@@ -1,17 +1,17 @@
 ﻿@page "/Wallet"
-@using ProjektKrypto2.Data
-@using ProjektKrypto2.Components.Models
-@using Microsoft.EntityFrameworkCore
+@using GroqApiLibrary
+@using System.Text.Json.Nodes
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject ApplicationDbContext DbContext
+@inject IHttpClientFactory HttpClientFactory
+
+@rendermode InteractiveServer
+
+<PageTitle>Twój portfel</PageTitle>
 
 <h3>Twój portfel kryptowalut</h3>
 
-@if (!isUserAuthenticated)
-{
-    <p><strong>Zaloguj się, aby zobaczyć swój portfel.</strong></p>
-}
-else if (wallet == null || !wallet.Any())
+@if (!cryptoWallets.Any())
 {
     <p>Twój portfel jest pusty.</p>
 }
@@ -23,41 +23,139 @@ else
                 <th>Symbol</th>
                 <th>Nazwa</th>
                 <th>Ilość</th>
-                <th>Łączna wartość (USD)</th>
+                <th>Cena zakupu (USD)</th>
+                <th>Wartość (USD)</th>
             </tr>
         </thead>
         <tbody>
-            @foreach (var entry in wallet)
+            @foreach (var crypto in cryptoWallets)
             {
                 <tr>
-                    <td>@entry.CryptoSymbol</td>
-                    <td>@entry.CryptoName</td>
-                    <td>@entry.Quantity</td>
-                    <td>@(entry.Quantity * entry.PriceUsd) USD</td>
+                    <td>@crypto.CryptoSymbol</td>
+                    <td>@crypto.CryptoName</td>
+                    <td>@crypto.Quantity.ToString("N4")</td>
+                    <td>@crypto.PriceUsd.ToString("N2")</td>
+                    <td>@(crypto.Quantity * crypto.PriceUsd).ToString("N2")</td>
                 </tr>
             }
         </tbody>
     </table>
 }
 
+<h3>Zapytaj AI o swój portfel</h3>
+<input type="text" class="form-control" @bind="userQuery" placeholder="Wpisz pytanie do AI..." />
+<button class="btn btn-primary mt-2" @onclick="AskChat">ASK Chat</button>
+
+<h4>Odpowiedź AI:</h4>
+<p>@chatResponse</p>
+
 @code {
-    private bool isUserAuthenticated = false;
-    private List<CryptoWallet> wallet = new();
+    private List<CryptoWallet> cryptoWallets = new();
+    private Dictionary<string, decimal> priceChanges = new();
+    private string userQuery = "";
+    private string chatResponse = "Tutaj pojawi się odpowiedź AI.";
+    private string? userId = null;
+    private GroqApiClient groqApi = new("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");
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
-        isUserAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+        var user = authState.User;
 
-        if (isUserAuthenticated)
+        if (user.Identity is { IsAuthenticated: true })
         {
-            var userId = authState.User.FindFirst(c => c.Type == "sub")?.Value;
+            userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
             if (!string.IsNullOrEmpty(userId))
             {
-                wallet = await DbContext.CryptoWallets
-                    .Where(w => w.UserId == userId)
-                    .ToListAsync();
+                await LoadCryptoWallet();
             }
+        }
+    }
+
+    private async Task LoadCryptoWallet()
+    {
+        if (string.IsNullOrEmpty(userId)) return;
+
+        cryptoWallets = await DbContext.CryptoWallets
+            .Where(w => w.UserId == userId)
+            .ToListAsync();
+
+        StateHasChanged();
+    }
+
+    private async Task FetchCryptoPriceChanges()
+    {
+        try
+        {
+            using var httpClient = HttpClientFactory.CreateClient();
+            var url = "https://api.coincap.io/v2/assets";
+            var response = await httpClient.GetFromJsonAsync<CryptoResponse>(url);
+
+            if (response?.Data != null)
+            {
+                priceChanges = response.Data
+                    .ToDictionary(c => c.Symbol, c => decimal.TryParse(c.ChangePercent24Hr, NumberStyles.Any, CultureInfo.InvariantCulture, out var change) ? change : 0);
+
+                Console.WriteLine("[DEBUG] Pobranie zmian cen zakończone!");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Nie udało się pobrać zmian cen: {ex.Message}");
+        }
+    }
+
+    private async Task AskChat()
+    {
+        if (string.IsNullOrEmpty(userQuery))
+        {
+            chatResponse = "Najpierw wpisz pytanie.";
+            return;
+        }
+
+        await FetchCryptoPriceChanges(); // Pobierz zmiany cen przed wysłaniem zapytania
+
+        string portfolioInfo = string.Join(", ", cryptoWallets.Select(c =>
+            $"{c.Quantity} {c.CryptoSymbol} (Zmiana 24h: {priceChanges.GetValueOrDefault(c.CryptoSymbol, 0):N2}%)"));
+
+        var request = new JsonObject
+            {
+                ["model"] = "mixtral-8x7b-32768",
+                ["messages"] = new JsonArray
+            {
+                new JsonObject
+                {
+                    ["role"] = "system",
+                    ["content"] = $"Użytkownik posiada następujące kryptowaluty: {portfolioInfo}.\n" +
+                                 "Oceń, czy sprzedaż każdej z nich jest opłacalna, biorąc pod uwagę zmianę ceny w ciągu ostatnich 24 godzin.\n\n" +
+                                 "REGUŁY:\n" +
+                                 "- Jeśli zmiana ceny jest UJEMNA (mniejsza niż 0%), sprzedaż NIE JEST opłacalna.\n" +
+                                 "- Jeśli zmiana ceny jest DODATNIA (większa niż 0%), sprzedaż MOŻE być korzystna.\n\n" +
+                                 "Przykłady:\n" +
+                                 "- BTC zmiana 24h: +5.2% → „Sprzedaż BTC może być opłacalna.”\n" +
+                                 "- ETH zmiana 24h: -2.1% → „Sprzedaż ETH NIE jest opłacalna.”\n\n" +
+                                 "Zastosuj te reguły do każdej kryptowaluty użytkownika i podaj jasne zalecenie."
+                },
+                new JsonObject
+                {
+                    ["role"] = "user",
+                    ["content"] = userQuery
+                }
+            }
+            };
+
+        try
+        {
+            Console.WriteLine("[DEBUG] Wysyłam zapytanie do Groq API...");
+            var result = await groqApi.CreateChatCompletionAsync(request);
+            chatResponse = result?["choices"]?[0]?["message"]?["content"]?.ToString() ?? "Brak odpowiedzi.";
+            Console.WriteLine($"[DEBUG] Odpowiedź API: {chatResponse}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ERROR] Błąd zapytania do AI: {ex.Message}");
+            chatResponse = "Błąd podczas przetwarzania zapytania.";
         }
     }
 }

@@ -3,13 +3,16 @@
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 @inject ApplicationDbContext DbContext
+@inject BalanceService BalanceService
 
 <div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid d-flex align-items-center">
         <a class="navbar-brand" href="">Portfel Krypto</a>
         @if (IsUserLoggedIn)
         {
-            <span class="text-white ms-auto">Saldo: <strong>@currentBalance.ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</strong></span>
+            <span class="text-white ms-auto">
+                Saldo: <strong>@Balance.ToString("C", CultureInfo.GetCultureInfo("en-US"))</strong>
+            </span>
         }
     </div>
 </div>
@@ -18,30 +21,29 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
-
         <AuthorizeView>
             <Authorized>
                 <div class="nav-item px-3">
-                    <a href="Auth" class="nav-link large-button" @onclick="ForceReload">
-                        <span class="bi bi-currency-bitcoin" aria-hidden="true"></span> Kryptowaluty
+                    <a href="Auth" class="nav-link large-button">
+                        <span class="bi bi-currency-bitcoin"></span> Kryptowaluty
                     </a>
                 </div>
 
                 <div class="nav-item px-3">
                     <a href="Wallet" class="nav-link large-button">
-                        <span class="bi bi-wallet2" aria-hidden="true"></span> Portfel
+                        <span class="bi bi-wallet2"></span> Portfel
                     </a>
                 </div>
 
                 <div class="nav-item px-3">
                     <a href="Deposit" class="nav-link large-button">
-                        <span class="bi bi-cash-coin" aria-hidden="true"></span> Doładuj saldo
+                        <span class="bi bi-cash-coin"></span> Doładuj saldo
                     </a>
                 </div>
 
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Manage">
-                        <span class="bi bi-person-fill" aria-hidden="true"></span> @username
+                        <span class="bi bi-person-fill"></span> @username
                     </NavLink>
                 </div>
 
@@ -50,7 +52,7 @@
                         <AntiforgeryToken />
                         <input type="hidden" name="ReturnUrl" value="@currentUrl" />
                         <button type="submit" class="nav-link">
-                            <span class="bi bi-box-arrow-left" aria-hidden="true"></span> Logout
+                            <span class="bi bi-box-arrow-left"></span> Logout
                         </button>
                     </form>
                 </div>
@@ -59,18 +61,17 @@
             <NotAuthorized>
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Login">
-                        <span class="bi bi-person-badge" aria-hidden="true"></span> Login
+                        <span class="bi bi-person-badge"></span> Login
                     </NavLink>
                 </div>
 
                 <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Register">
-                        <span class="bi bi-person-plus" aria-hidden="true"></span> Register
+                        <span class="bi bi-person-plus"></span> Register
                     </NavLink>
                 </div>
             </NotAuthorized>
         </AuthorizeView>
-
     </nav>
 </div>
 
@@ -97,17 +98,10 @@
     private string? currentUrl;
     private string username = "Guest";
     private bool IsUserLoggedIn = false;
-    private decimal currentBalance = 0;
+    private decimal Balance = 0;
+    private string? userId = null;
 
     protected override async Task OnInitializedAsync()
-    {
-        currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
-        NavigationManager.LocationChanged += OnLocationChanged;
-
-        await LoadUserData();
-    }
-
-    private async Task LoadUserData()
     {
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
@@ -115,31 +109,28 @@
         if (user.Identity is { IsAuthenticated: true })
         {
             IsUserLoggedIn = true;
-            username = GetUsername(user.Identity.Name);
+            userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-            var userId = user.FindFirst(c => c.Type == "sub")?.Value;
-            if (userId != null)
+            if (!string.IsNullOrEmpty(userId))
             {
-                var dbUser = await DbContext.Users.FindAsync(userId);
-                if (dbUser != null)
-                {
-                    currentBalance = dbUser.BalanceUsd;
-                }
+                await LoadBalance();
             }
         }
-        else
-        {
-            IsUserLoggedIn = false;
-            username = "Guest";
-            currentBalance = 0;
-        }
+    }
 
+    private async Task LoadBalance()
+    {
+        if (string.IsNullOrEmpty(userId)) return;
+        await BalanceService.LoadBalanceAsync(userId);
+        Balance = BalanceService.GetBalance();
         StateHasChanged();
     }
 
-    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    private async void OnLocationChanged(object? sender, LocationChangedEventArgs e)
     {
         currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        Console.WriteLine("[DEBUG] NavMenu: Zmiana strony, odświeżam saldo...");
+        await LoadBalance();
         StateHasChanged();
     }
 
@@ -151,11 +142,6 @@
     private string GetUsername(string? email)
     {
         if (string.IsNullOrEmpty(email)) return "Guest";
-        return email.Split('@')[0]; // Pobiera część przed "@"
-    }
-
-    private void ForceReload()
-    {
-        NavigationManager.NavigateTo("Auth", forceLoad: true);
+        return email.Split('@')[0];
     }
 }

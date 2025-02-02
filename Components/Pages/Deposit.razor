@@ -7,6 +7,7 @@
 @using System.Security.Claims
 @inject ApplicationDbContext DbContext
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject BalanceService BalanceService
 
 @rendermode InteractiveServer
 
@@ -36,39 +37,20 @@ else
 }
 
 @code {
-
     private decimal Balance { get; set; } = 0;
     private decimal amountToAdd = 0;
     private string transactionMessage = "";
     private bool isUserAuthenticated = false;
     private string? userId = null;
 
-    private decimal balance = 0;
-
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
 
-        Console.WriteLine($"[DEBUG] Czy użytkownik jest zalogowany? {user.Identity?.IsAuthenticated}");
-
         if (user.Identity is { IsAuthenticated: true })
         {
-            Console.WriteLine("[DEBUG] Lista claims:");
-            foreach (var claim in user.Claims)
-            {
-                Console.WriteLine($"[DEBUG] {claim.Type}: {claim.Value}");
-            }
-
-            // Sprawdź, jakie dokładnie pole zawiera ID użytkownika
             userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-
-            foreach (var claim in user.Claims)
-            {
-                Console.WriteLine($"[DEBUG] {claim.Type}: {claim.Value}");
-            }
-
-            Console.WriteLine($"[DEBUG] Pobranie userId: {userId}");
 
             if (!string.IsNullOrEmpty(userId))
             {
@@ -76,61 +58,27 @@ else
                 await LoadBalance();
             }
         }
-        else
-        {
-            Console.WriteLine("[DEBUG] Użytkownik NIE jest zalogowany!");
-        }
     }
-
 
     private async Task LoadBalance()
     {
-        Console.WriteLine("[DEBUG] Uruchomiono LoadBalance()");
-        Console.WriteLine($"[DEBUG] userId przed sprawdzeniem: {userId}");
-
-        if (string.IsNullOrEmpty(userId))
-        {
-            Console.WriteLine("[DEBUG] userId jest null lub puste, przerywam.");
-            return;
-        }
-
-        Console.WriteLine($"[DEBUG] Pobieranie salda użytkownika o ID: {userId}");
-
-        var userAccount = await DbContext.UserBalances.FindAsync(userId);
-
-        if (userAccount != null)
-        {
-            Balance = userAccount.Balance;
-            Console.WriteLine($"[DEBUG] Wczytano saldo: {Balance}");
-        }
-        else
-        {
-            Console.WriteLine("[DEBUG] Brak użytkownika w UserBalances - Tworzenie nowego wpisu...");
-            userAccount = new UserBalance { UserId = userId, Balance = 0 };
-            await DbContext.UserBalances.AddAsync(userAccount);
-            await DbContext.SaveChangesAsync();
-            Console.WriteLine("[DEBUG] Dodano nowego użytkownika do UserBalances.");
-        }
-
+        if (string.IsNullOrEmpty(userId)) return;
+        await BalanceService.LoadBalanceAsync(userId);
+        Balance = BalanceService.GetBalance();
         StateHasChanged();
     }
 
     private async Task DepositFunds()
     {
-        Console.WriteLine("[DEBUG] Metoda DepositFunds została wywołana!");
-
         if (userId == null || amountToAdd <= 0)
         {
             transactionMessage = "Podaj poprawną kwotę doładowania!";
-            Console.WriteLine("[DEBUG] Niepoprawna kwota doładowania.");
             return;
         }
 
         var dbUser = await DbContext.UserBalances.FindAsync(userId);
-
         if (dbUser == null)
         {
-            Console.WriteLine("[DEBUG] Użytkownik nie istnieje w bazie. Tworzenie nowego wpisu...");
             dbUser = new UserBalance { UserId = userId, Balance = 0 };
             await DbContext.UserBalances.AddAsync(dbUser);
         }
@@ -138,11 +86,10 @@ else
         dbUser.Balance += amountToAdd;
         await DbContext.SaveChangesAsync();
 
-        Balance = dbUser.Balance; // ✅ Aktualizacja zmiennej w UI
+        await BalanceService.UpdateBalanceAsync(userId, dbUser.Balance); // Aktualizacja globalna
+
+        Balance = dbUser.Balance;
         transactionMessage = $"Doładowano saldo o {amountToAdd.ToString("C", CultureInfo.GetCultureInfo("en-US"))}!";
-        Console.WriteLine($"[DEBUG] Nowe saldo: {Balance}");
-
-        StateHasChanged(); // ✅ Odświeżenie UI
+        StateHasChanged();
     }
-
 }
