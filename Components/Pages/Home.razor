@@ -1,0 +1,13 @@
+﻿@page "/"
+
+@using Microsoft.AspNetCore.Authorization
+
+@attribute [Authorize]
+
+<PageTitle>Auth</PageTitle>
+
+<h1>Zalogowano pomyslnie</h1>
+
+<AuthorizeView>
+    Witaj,  @context.User.Identity?.Name! Przejdż do swojego portfela aby zacząć działać: <NavLink href="Auth">Portfel</NavLink>
+</AuthorizeView>

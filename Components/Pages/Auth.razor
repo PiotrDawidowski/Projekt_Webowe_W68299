@@ -1,0 +1,128 @@
+﻿@page "/Auth"
+@using System.Net.Http
+@using System.Net.Http.Json
+@using System.Globalization
+@using ProjektKrypto2.Components.Models
+@inject IHttpClientFactory HttpClientFactory
+@inject NavigationManager NavigationManager
+@rendermode InteractiveServer
+
+<PageTitle>Auth</PageTitle>
+
+<h3>Lista dostępnych kryptowalut</h3>
+
+<p>Ostatnia aktualizacja: @lastUpdated.ToString("HH:mm:ss")</p>
+
+@if (!cryptos.Any())
+{
+    <p>Ładowanie danych...</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Rank</th>
+                <th>Logo</th>
+                <th>Nazwa</th>
+                <th>Symbol</th>
+                <th>Cena (USD)</th>
+                <th>Zmiana 24h (%)</th>
+                <th>Wolumen 24h (USD)</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var crypto in cryptos)
+            {
+                var priceChangePercent = ParseDecimal(crypto.ChangePercent24Hr);
+                <tr>
+                    <td>@crypto.Rank</td>
+                    <td>
+                        <img src="@crypto.GetIconUrl()"
+                             alt="@crypto.Symbol"
+                             width="32" height="32"
+                             onerror="this.onerror=null; this.src='sample-icon.png';">
+                    </td>
+                    <td>@crypto.Name</td>
+                    <td>@crypto.Symbol</td>
+                    <td>@(ParseDecimal(crypto.PriceUsd).ToString("N2"))</td>
+                    <td style="color: @(priceChangePercent > 0 ? "green" : (priceChangePercent < 0 ? "red" : "black"))">
+                        @(priceChangePercent.ToString("N2"))
+                    </td>
+                    <td>@(ParseDecimal(crypto.VolumeUsd24Hr).ToString("N0"))</td>
+                </tr>
+            }
+        </tbody>
+
+    </table>
+}
+
+@code {
+    private List<Crypto> cryptos { get; set; } = new();
+    private DateTime lastUpdated = DateTime.Now;
+    private CancellationTokenSource cts = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        Console.WriteLine("[DEBUG] Inicjalizacja komponentu...");
+        await FetchCryptoData();
+        StartAutoRefresh();
+    }
+
+    private void StartAutoRefresh()
+    {
+        _ = Task.Run(async () =>
+        {
+            while (!cts.Token.IsCancellationRequested)
+            {
+                await FetchCryptoData();
+                await Task.Delay(TimeSpan.FromSeconds(1), cts.Token); // Aktualizacja co 10s
+            }
+        }, cts.Token);
+    }
+
+    private async Task FetchCryptoData()
+    {
+        try
+        {
+            Console.WriteLine("[DEBUG] Pobieranie danych z API...");
+            using var httpClient = HttpClientFactory.CreateClient();
+            var url = "https://api.coincap.io/v2/assets?limit=50";
+            var response = await httpClient.GetFromJsonAsync<CryptoResponse>(url, cts.Token);
+
+            if (response?.Data != null && response.Data.Any())
+            {
+                cryptos = response.Data.ToList();
+                lastUpdated = DateTime.Now;
+
+                Console.WriteLine($"[DEBUG] Zaktualizowano dane. BTC Price: {cryptos.FirstOrDefault(c => c.Symbol == "BTC")?.PriceUsd}");
+
+                await InvokeAsync(StateHasChanged);
+            }
+            else
+            {
+                Console.WriteLine("[DEBUG] Brak danych z API!");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Błąd podczas pobierania danych: {ex.Message}");
+        }
+    }
+
+
+    private decimal ParseDecimal(string value)
+    {
+        if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dec))
+        {
+            return dec;
+        }
+        return 0;
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+}

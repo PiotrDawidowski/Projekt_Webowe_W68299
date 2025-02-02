@@ -1,0 +1,27 @@
+﻿@keyframes fade-out-green {
+    from {
+        background-color: rgba(0, 255, 0, 0.4);
+    }
+
+    to {
+        background-color: white;
+    }
+}
+
+@keyframes fade-out-red {
+    from {
+        background-color: rgba(255, 0, 0, 0.4);
+    }
+
+    to {
+        background-color: white;
+    }
+}
+
+.fade-green {
+    animation: fade-out-green 3s ease-in-out forwards;
+}
+
+.fade-red {
+    animation: fade-out-red 3s ease-in-out forwards;
+}
