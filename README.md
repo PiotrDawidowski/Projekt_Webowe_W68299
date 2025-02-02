@@ -82,6 +82,6 @@ Projekt udostępniony na licencji MIT. Możesz swobodnie modyfikować i wykorzys
 ---
 
 ## 👥 **Autorzy**
-- Piotr Dawidowski([(https://github.com/PiotrDawidowski)])
+- Piotr Dawidowski(https://github.com/PiotrDawidowski)
 
 Jeśli masz jakiekolwiek pytania lub sugestie, zapraszam do kontaktu poprzez **Issues** lub **Pull Requests**! 🚀
