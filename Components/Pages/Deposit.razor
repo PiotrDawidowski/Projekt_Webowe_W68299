@@ -1,0 +1,148 @@
+﻿@page "/Deposit"
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Authorization
+@using ProjektKrypto2.Data
+@using ProjektKrypto2.Components.Models
+@using Microsoft.EntityFrameworkCore
+@using System.Security.Claims
+@inject ApplicationDbContext DbContext
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+@rendermode InteractiveServer
+
+<PageTitle>Doładuj konto</PageTitle>
+
+<h3>Doładuj swoje saldo</h3>
+
+@if (!isUserAuthenticated)
+{
+    <p><strong>Zaloguj się, aby doładować saldo.</strong></p>
+}
+else
+{
+    <p>Twoje saldo: <strong>@Balance.ToString("C", CultureInfo.GetCultureInfo("en-US"))</strong></p>
+
+    <div class="mb-3">
+        <label>Kwota doładowania (USD):</label>
+        <input type="number" class="form-control" @bind="amountToAdd" min="1" step="0.01" />
+    </div>
+
+    <button class="btn btn-primary" @onclick="DepositFunds">Doładuj</button>
+
+    @if (!string.IsNullOrEmpty(transactionMessage))
+    {
+        <p class="mt-3">@transactionMessage</p>
+    }
+}
+
+@code {
+
+    private decimal Balance { get; set; } = 0;
+    private decimal amountToAdd = 0;
+    private string transactionMessage = "";
+    private bool isUserAuthenticated = false;
+    private string? userId = null;
+
+    private decimal balance = 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        Console.WriteLine($"[DEBUG] Czy użytkownik jest zalogowany? {user.Identity?.IsAuthenticated}");
+
+        if (user.Identity is { IsAuthenticated: true })
+        {
+            Console.WriteLine("[DEBUG] Lista claims:");
+            foreach (var claim in user.Claims)
+            {
+                Console.WriteLine($"[DEBUG] {claim.Type}: {claim.Value}");
+            }
+
+            // Sprawdź, jakie dokładnie pole zawiera ID użytkownika
+            userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+            foreach (var claim in user.Claims)
+            {
+                Console.WriteLine($"[DEBUG] {claim.Type}: {claim.Value}");
+            }
+
+            Console.WriteLine($"[DEBUG] Pobranie userId: {userId}");
+
+            if (!string.IsNullOrEmpty(userId))
+            {
+                isUserAuthenticated = true;
+                await LoadBalance();
+            }
+        }
+        else
+        {
+            Console.WriteLine("[DEBUG] Użytkownik NIE jest zalogowany!");
+        }
+    }
+
+
+    private async Task LoadBalance()
+    {
+        Console.WriteLine("[DEBUG] Uruchomiono LoadBalance()");
+        Console.WriteLine($"[DEBUG] userId przed sprawdzeniem: {userId}");
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            Console.WriteLine("[DEBUG] userId jest null lub puste, przerywam.");
+            return;
+        }
+
+        Console.WriteLine($"[DEBUG] Pobieranie salda użytkownika o ID: {userId}");
+
+        var userAccount = await DbContext.UserBalances.FindAsync(userId);
+
+        if (userAccount != null)
+        {
+            Balance = userAccount.Balance;
+            Console.WriteLine($"[DEBUG] Wczytano saldo: {Balance}");
+        }
+        else
+        {
+            Console.WriteLine("[DEBUG] Brak użytkownika w UserBalances - Tworzenie nowego wpisu...");
+            userAccount = new UserBalance { UserId = userId, Balance = 0 };
+            await DbContext.UserBalances.AddAsync(userAccount);
+            await DbContext.SaveChangesAsync();
+            Console.WriteLine("[DEBUG] Dodano nowego użytkownika do UserBalances.");
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task DepositFunds()
+    {
+        Console.WriteLine("[DEBUG] Metoda DepositFunds została wywołana!");
+
+        if (userId == null || amountToAdd <= 0)
+        {
+            transactionMessage = "Podaj poprawną kwotę doładowania!";
+            Console.WriteLine("[DEBUG] Niepoprawna kwota doładowania.");
+            return;
+        }
+
+        var dbUser = await DbContext.UserBalances.FindAsync(userId);
+
+        if (dbUser == null)
+        {
+            Console.WriteLine("[DEBUG] Użytkownik nie istnieje w bazie. Tworzenie nowego wpisu...");
+            dbUser = new UserBalance { UserId = userId, Balance = 0 };
+            await DbContext.UserBalances.AddAsync(dbUser);
+        }
+
+        dbUser.Balance += amountToAdd;
+        await DbContext.SaveChangesAsync();
+
+        Balance = dbUser.Balance; // ✅ Aktualizacja zmiennej w UI
+        transactionMessage = $"Doładowano saldo o {amountToAdd.ToString("C", CultureInfo.GetCultureInfo("en-US"))}!";
+        Console.WriteLine($"[DEBUG] Nowe saldo: {Balance}");
+
+        StateHasChanged(); // ✅ Odświeżenie UI
+    }
+
+}

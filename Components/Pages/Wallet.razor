@@ -1,0 +1,63 @@
+﻿@page "/Wallet"
+@using ProjektKrypto2.Data
+@using ProjektKrypto2.Components.Models
+@using Microsoft.EntityFrameworkCore
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ApplicationDbContext DbContext
+
+<h3>Twój portfel kryptowalut</h3>
+
+@if (!isUserAuthenticated)
+{
+    <p><strong>Zaloguj się, aby zobaczyć swój portfel.</strong></p>
+}
+else if (wallet == null || !wallet.Any())
+{
+    <p>Twój portfel jest pusty.</p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Nazwa</th>
+                <th>Ilość</th>
+                <th>Łączna wartość (USD)</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var entry in wallet)
+            {
+                <tr>
+                    <td>@entry.CryptoSymbol</td>
+                    <td>@entry.CryptoName</td>
+                    <td>@entry.Quantity</td>
+                    <td>@(entry.Quantity * entry.PriceUsd) USD</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private bool isUserAuthenticated = false;
+    private List<CryptoWallet> wallet = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        isUserAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+
+        if (isUserAuthenticated)
+        {
+            var userId = authState.User.FindFirst(c => c.Type == "sub")?.Value;
+            if (!string.IsNullOrEmpty(userId))
+            {
+                wallet = await DbContext.CryptoWallets
+                    .Where(w => w.UserId == userId)
+                    .ToListAsync();
+            }
+        }
+    }
+}

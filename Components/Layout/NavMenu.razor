@@ -1,11 +1,16 @@
 ﻿@implements IDisposable
-
+@using ProjektKrypto2.Data
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ApplicationDbContext DbContext
 
 <div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="">ProjektKrypto2</a>
+    <div class="container-fluid d-flex align-items-center">
+        <a class="navbar-brand" href="">Portfel Krypto</a>
+        @if (IsUserLoggedIn)
+        {
+            <span class="text-white ms-auto">Saldo: <strong>@currentBalance.ToString("C", System.Globalization.CultureInfo.GetCultureInfo("en-US"))</strong></span>
+        }
     </div>
 </div>
 
@@ -14,51 +19,85 @@
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
 
-        <div class="nav-item px-3">
-            <div class="nav-item px-3">
-                <a href="Auth" class="nav-link" @onclick="ForceReload">
-                    <span class="bi bi-lock-nav-menu" aria-hidden="true"></span> @(IsUserLoggedIn ? "Portfel" : "Auth Required")
-                </a>
-            </div>
-        </div>
-
         <AuthorizeView>
             <Authorized>
                 <div class="nav-item px-3">
+                    <a href="Auth" class="nav-link large-button" @onclick="ForceReload">
+                        <span class="bi bi-currency-bitcoin" aria-hidden="true"></span> Kryptowaluty
+                    </a>
+                </div>
+
+                <div class="nav-item px-3">
+                    <a href="Wallet" class="nav-link large-button">
+                        <span class="bi bi-wallet2" aria-hidden="true"></span> Portfel
+                    </a>
+                </div>
+
+                <div class="nav-item px-3">
+                    <a href="Deposit" class="nav-link large-button">
+                        <span class="bi bi-cash-coin" aria-hidden="true"></span> Doładuj saldo
+                    </a>
+                </div>
+
+                <div class="nav-item px-3">
                     <NavLink class="nav-link" href="Account/Manage">
-                        <span class="bi bi-person-fill-nav-menu" aria-hidden="true"></span> @username
+                        <span class="bi bi-person-fill" aria-hidden="true"></span> @username
                     </NavLink>
                 </div>
+
                 <div class="nav-item px-3">
                     <form action="Account/Logout" method="post">
                         <AntiforgeryToken />
                         <input type="hidden" name="ReturnUrl" value="@currentUrl" />
                         <button type="submit" class="nav-link">
-                            <span class="bi bi-arrow-bar-left-nav-menu" aria-hidden="true"></span> Logout
+                            <span class="bi bi-box-arrow-left" aria-hidden="true"></span> Logout
                         </button>
                     </form>
                 </div>
             </Authorized>
+
             <NotAuthorized>
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Register">
-                        <span class="bi bi-person-nav-menu" aria-hidden="true"></span> Register
+                    <NavLink class="nav-link" href="Account/Login">
+                        <span class="bi bi-person-badge" aria-hidden="true"></span> Login
                     </NavLink>
                 </div>
+
                 <div class="nav-item px-3">
-                    <NavLink class="nav-link" href="Account/Login">
-                        <span class="bi bi-person-badge-nav-menu" aria-hidden="true"></span> Login
+                    <NavLink class="nav-link" href="Account/Register">
+                        <span class="bi bi-person-plus" aria-hidden="true"></span> Register
                     </NavLink>
                 </div>
             </NotAuthorized>
         </AuthorizeView>
+
     </nav>
 </div>
+
+<style>
+    .large-button {
+        display: block;
+        padding: 15px;
+        font-size: 1.2rem;
+        text-align: center;
+        background: linear-gradient(45deg, #1d3b70, #233d7b);
+        border-radius: 10px;
+        color: white;
+        font-weight: bold;
+        transition: background 0.3s;
+    }
+
+        .large-button:hover {
+            background: linear-gradient(45deg, #1b3564, #1e366a);
+            color: white;
+        }
+</style>
 
 @code {
     private string? currentUrl;
     private string username = "Guest";
     private bool IsUserLoggedIn = false;
+    private decimal currentBalance = 0;
 
     protected override async Task OnInitializedAsync()
     {
@@ -77,11 +116,22 @@
         {
             IsUserLoggedIn = true;
             username = GetUsername(user.Identity.Name);
+
+            var userId = user.FindFirst(c => c.Type == "sub")?.Value;
+            if (userId != null)
+            {
+                var dbUser = await DbContext.Users.FindAsync(userId);
+                if (dbUser != null)
+                {
+                    currentBalance = dbUser.BalanceUsd;
+                }
+            }
         }
         else
         {
             IsUserLoggedIn = false;
             username = "Guest";
+            currentBalance = 0;
         }
 
         StateHasChanged();

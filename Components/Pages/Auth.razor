@@ -2,14 +2,53 @@
 @using System.Net.Http
 @using System.Net.Http.Json
 @using System.Globalization
+@using Microsoft.AspNetCore.Components.Authorization
 @using ProjektKrypto2.Components.Models
+@using ProjektKrypto2.Data
+@using Microsoft.EntityFrameworkCore
 @inject IHttpClientFactory HttpClientFactory
 @inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject ApplicationDbContext DbContext
 @rendermode InteractiveServer
 
 <PageTitle>Auth</PageTitle>
 
-<h3>Lista dostępnych kryptowalut</h3>
+<h3>Kup kryptowaluty</h3>
+
+@if (!isUserAuthenticated)
+{
+    <p><strong>Zaloguj się, aby kupować kryptowaluty.</strong></p>
+}
+else
+{
+    <p>Twoje saldo: <strong>@balance.ToString("C", CultureInfo.GetCultureInfo("en-US"))</strong></p>
+
+    <div class="mb-3">
+        <label>Wybierz kryptowalutę:</label>
+        <select @bind="selectedCryptoSymbol" class="form-select">
+            <option value="">-- Wybierz --</option>
+            @foreach (var crypto in cryptos)
+            {
+                <option value="@crypto.Symbol">@crypto.Name (@crypto.Symbol)</option>
+            }
+        </select>
+    </div>
+
+    <div class="mb-3">
+        <label>Wpisz ilość:</label>
+        <input type="number" class="form-control" @bind="quantity" min="0.01" step="0.01" />
+    </div>
+
+    <button class="btn btn-primary" @onclick="BuyCrypto">Kup</button>
+
+    @if (!string.IsNullOrEmpty(transactionMessage))
+    {
+        <p class="mt-2">@transactionMessage</p>
+    }
+}
+
+<h3 style="margin-top: 20px;">Lista dostępnych kryptowalut</h3>
 
 <p>Ostatnia aktualizacja: @lastUpdated.ToString("HH:mm:ss")</p>
 
@@ -53,7 +92,6 @@ else
                 </tr>
             }
         </tbody>
-
     </table>
 }
 
@@ -62,12 +100,46 @@ else
     private DateTime lastUpdated = DateTime.Now;
     private CancellationTokenSource cts = new();
 
+    private string selectedCryptoSymbol = "";
+    private decimal quantity = 0;
+    private string transactionMessage = "";
+    private bool isUserAuthenticated = false;
+    private decimal balance = 0;
+    private string? userId = null;
+
     protected override async Task OnInitializedAsync()
     {
-        Console.WriteLine("[DEBUG] Inicjalizacja komponentu...");
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        isUserAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+        userId = authState.User.FindFirst(c => c.Type == "sub")?.Value;
+
+        if (isUserAuthenticated && !string.IsNullOrEmpty(userId))
+        {
+            await LoadUserBalance();
+        }
+
         await FetchCryptoData();
         StartAutoRefresh();
     }
+
+    private async Task LoadUserBalance()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userId = authState.User.FindFirst(c => c.Type == "sub")?.Value;
+
+        if (!string.IsNullOrEmpty(userId))
+        {
+            var dbUser = await DbContext.Users
+                .AsNoTracking()
+                .FirstOrDefaultAsync(u => u.Id == userId);
+
+            if (dbUser != null)
+            {
+                balance = dbUser.BalanceUsd;
+            }
+        }
+    }
+
 
     private void StartAutoRefresh()
     {
@@ -76,7 +148,7 @@ else
             while (!cts.Token.IsCancellationRequested)
             {
                 await FetchCryptoData();
-                await Task.Delay(TimeSpan.FromSeconds(1), cts.Token); // Aktualizacja co 10s
+                await Task.Delay(TimeSpan.FromSeconds(10), cts.Token);
             }
         }, cts.Token);
     }
@@ -85,9 +157,8 @@ else
     {
         try
         {
-            Console.WriteLine("[DEBUG] Pobieranie danych z API...");
             using var httpClient = HttpClientFactory.CreateClient();
-            var url = "https://api.coincap.io/v2/assets?limit=50";
+            var url = "https://api.coincap.io/v2/assets?limit=30";
             var response = await httpClient.GetFromJsonAsync<CryptoResponse>(url, cts.Token);
 
             if (response?.Data != null && response.Data.Any())
@@ -95,29 +166,73 @@ else
                 cryptos = response.Data.ToList();
                 lastUpdated = DateTime.Now;
 
-                Console.WriteLine($"[DEBUG] Zaktualizowano dane. BTC Price: {cryptos.FirstOrDefault(c => c.Symbol == "BTC")?.PriceUsd}");
-
                 await InvokeAsync(StateHasChanged);
-            }
-            else
-            {
-                Console.WriteLine("[DEBUG] Brak danych z API!");
             }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Błąd podczas pobierania danych: {ex.Message}");
+            Console.WriteLine($"Błąd pobierania danych: {ex.Message}");
         }
     }
 
+    private async Task BuyCrypto()
+    {
+        if (!isUserAuthenticated || userId == null)
+        {
+            transactionMessage = "Musisz być zalogowany.";
+            return;
+        }
+
+        if (string.IsNullOrEmpty(selectedCryptoSymbol) || quantity <= 0)
+        {
+            transactionMessage = "Niepoprawna ilość.";
+            return;
+        }
+
+        var crypto = cryptos.FirstOrDefault(c => c.Symbol == selectedCryptoSymbol);
+        if (crypto == null)
+        {
+            transactionMessage = "Wybrana kryptowaluta nie istnieje.";
+            return;
+        }
+
+        var dbUser = await DbContext.Users.FindAsync(userId);
+        if (dbUser == null)
+        {
+            transactionMessage = "Błąd użytkownika.";
+            return;
+        }
+
+        decimal price = ParseDecimal(crypto.PriceUsd) * quantity;
+
+        if (dbUser.BalanceUsd >= price)
+        {
+            dbUser.BalanceUsd -= price;
+
+            var walletEntry = new CryptoWallet
+                {
+                    UserId = userId,
+                    CryptoSymbol = crypto.Symbol,
+                    CryptoName = crypto.Name,
+                    Quantity = quantity,
+                    PriceUsd = ParseDecimal(crypto.PriceUsd)
+                };
+
+            await DbContext.CryptoWallets.AddAsync(walletEntry);
+            await DbContext.SaveChangesAsync();
+
+            await LoadUserBalance();
+            transactionMessage = $"Zakupiono {quantity} {crypto.Symbol} za {price} USD!";
+        }
+        else
+        {
+            transactionMessage = "Za mało środków!";
+        }
+    }
 
     private decimal ParseDecimal(string value)
     {
-        if (decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dec))
-        {
-            return dec;
-        }
-        return 0;
+        return decimal.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dec) ? dec : 0;
     }
 
     public void Dispose()

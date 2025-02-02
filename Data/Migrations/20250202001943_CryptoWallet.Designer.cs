@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ProjektKrypto2.Data;
 
@@ -11,9 +12,11 @@ using ProjektKrypto2.Data;
 namespace ProjektKrypto2.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20250202001943_CryptoWallet")]
+    partial class CryptoWallet
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -188,19 +191,6 @@ namespace ProjektKrypto2.Migrations
                     b.ToTable("CryptoWallets");
                 });
 
-            modelBuilder.Entity("ProjektKrypto2.Components.Models.UserBalance", b =>
-                {
-                    b.Property<string>("UserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<decimal>("Balance")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.HasKey("UserId");
-
-                    b.ToTable("UserBalances");
-                });
-
             modelBuilder.Entity("ProjektKrypto2.Data.ApplicationUser", b =>
                 {
                     b.Property<string>("Id")
@@ -208,9 +198,6 @@ namespace ProjektKrypto2.Migrations
 
                     b.Property<int>("AccessFailedCount")
                         .HasColumnType("int");
-
-                    b.Property<decimal>("BalanceUsd")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("ConcurrencyStamp")
                         .IsConcurrencyToken()
@@ -321,17 +308,6 @@ namespace ProjektKrypto2.Migrations
                 });
 
             modelBuilder.Entity("ProjektKrypto2.Components.Models.CryptoWallet", b =>
-                {
-                    b.HasOne("ProjektKrypto2.Data.ApplicationUser", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("ProjektKrypto2.Components.Models.UserBalance", b =>
                 {
                     b.HasOne("ProjektKrypto2.Data.ApplicationUser", "User")
                         .WithMany()
